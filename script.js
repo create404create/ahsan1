@@ -1,21 +1,25 @@
-const board = [
-  ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
-  ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
-  ['', '', '', '', '', '', '', ''],
-  ['', '', '', '', '', '', '', ''],
-  ['', '', '', '', '', '', '', ''],
-  ['', '', '', '', '', '', '', ''],
-  ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
-  ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'],
-];
-
-let selectedPiece = null;
-let selectedSquare = null;
-let currentPlayer = 'white';
-
 const chessboard = document.getElementById('chessboard');
 const statusText = document.getElementById('status');
+const chatBox = document.getElementById('chat-box');
+const chatInput = document.getElementById('chat-input');
+const sendButton = document.getElementById('send-button');
 
+const game = new Chess();
+let selectedSquare = null;
+let draggablePiece = null;
+
+// Initialize Stockfish
+const stockfish = new Worker('stockfish.js'); // Download Stockfish.js from https://github.com/nmrugg/stockfish.js
+stockfish.onmessage = (event) => {
+  if (event.data.startsWith('bestmove')) {
+    const move = event.data.split(' ')[1];
+    game.move(move);
+    updateBoard();
+    updateStatus();
+  }
+};
+
+// Create the chessboard
 function createBoard() {
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
@@ -31,78 +35,71 @@ function createBoard() {
   updateBoard();
 }
 
+// Update the board based on the game state
 function updateBoard() {
   const squares = document.querySelectorAll('.square');
   squares.forEach((square) => {
     const row = square.dataset.row;
     const col = square.dataset.col;
-    const piece = board[row][col];
-    square.textContent = getPieceSymbol(piece);
-    square.style.color = piece === piece.toUpperCase() ? 'white' : 'black';
+    const piece = game.board()[row][col];
+    square.textContent = piece ? getPieceSymbol(piece) : '';
+    square.style.color = piece && piece.color === 'w' ? 'white' : 'black';
   });
 }
 
+// Get the Unicode symbol for a piece
 function getPieceSymbol(piece) {
-  switch (piece.toLowerCase()) {
-    case 'p': return '♟';
-    case 'r': return '♜';
-    case 'n': return '♞';
-    case 'b': return '♝';
-    case 'q': return '♛';
-    case 'k': return '♚';
-    default: return '';
-  }
+  const symbols = {
+    p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚',
+    P: '♙', R: '♖', N: '♘', B: '♗', Q: '♕', K: '♔',
+  };
+  return symbols[piece.type] || '';
 }
 
+// Handle square clicks
 function handleSquareClick(row, col) {
-  const piece = board[row][col];
+  const square = `${String.fromCharCode(97 + col)}${8 - row}`;
+  const move = game.move({ from: selectedSquare, to: square, promotion: 'q' });
 
-  if (selectedPiece) {
-    movePiece(row, col);
-  } else if (piece && isValidPiece(piece)) {
-    selectPiece(row, col);
-  }
-}
-
-function isValidPiece(piece) {
-  const isWhitePiece = piece === piece.toUpperCase();
-  return (currentPlayer === 'white' && isWhitePiece) || (currentPlayer === 'black' && !isWhitePiece);
-}
-
-function selectPiece(row, col) {
-  selectedPiece = board[row][col];
-  selectedSquare = { row, col };
-  highlightSquare(row, col);
-}
-
-function movePiece(row, col) {
-  if (isValidMove(row, col)) {
-    board[row][col] = selectedPiece;
-    board[selectedSquare.row][selectedSquare.col] = '';
-    selectedPiece = null;
+  if (move) {
     selectedSquare = null;
-    currentPlayer = currentPlayer === 'white' ? 'black' : 'white';
     updateBoard();
     updateStatus();
+    if (game.turn() === 'b') {
+      stockfish.postMessage('position fen ' + game.fen());
+      stockfish.postMessage('go depth 10');
+    }
   } else {
-    alert('Invalid move!');
+    selectedSquare = square;
   }
 }
 
-function isValidMove(row, col) {
-  // Basic move validation (for simplicity, allows any move)
-  return true;
-}
-
-function highlightSquare(row, col) {
-  const squares = document.querySelectorAll('.square');
-  squares.forEach((square) => square.classList.remove('selected'));
-  const square = document.querySelector(`.square[data-row="${row}"][data-col="${col}"]`);
-  square.classList.add('selected');
-}
-
+// Update the status text
 function updateStatus() {
-  statusText.textContent = `${currentPlayer === 'white' ? 'White' : 'Black'}'s turn`;
+  statusText.textContent = `${game.turn() === 'w' ? 'White' : 'Black'}'s turn`;
+  if (game.in_checkmate()) {
+    statusText.textContent = `Checkmate! ${game.turn() === 'w' ? 'Black' : 'White'} wins!`;
+  } else if (game.in_draw()) {
+    statusText.textContent = 'Draw!';
+  }
 }
 
+// Chat functionality
+sendButton.addEventListener('click', () => {
+  const message = chatInput.value.trim();
+  if (message) {
+    chatBox.innerHTML += `<div><strong>You:</strong> ${message}</div>`;
+    chatInput.value = '';
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+});
+
+chatInput.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    sendButton.click();
+  }
+});
+
+// Initialize the game
 createBoard();
+updateStatus();
